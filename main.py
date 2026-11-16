@@ -1,13 +1,19 @@
-from fastapi import FastAPI, HTTPException
+from typing import Optional
+from fastapi import FastAPI, HTTPException, Response
 from pydantic import BaseModel
 
 app = FastAPI()
 
-# Pydantic modeli: Dışarıdan (POST ile) gelecek verinin kalıbını belirliyoruz
+# Yeni görev oluşturma modeli
 class TaskCreate(BaseModel):
     title: str
 
-# In-memory (bellekte tutulan) sahte veri tabanımız
+# Görev güncelleme modeli (title ve done alanları isteğe bağlı gönderilebilir)
+class TaskUpdate(BaseModel):
+    title: Optional[str] = None
+    done: Optional[bool] = None
+
+# In-memory sahte veri tabanımız
 tasks = [
     {"id": 1, "title": "Buy milk", "done": False},
     {"id": 2, "title": "Learn FastAPI", "done": True},
@@ -37,25 +43,57 @@ def get_task(id: int):
             return task
     raise HTTPException(status_code=404, detail=f"Task {id} not found")
 
-# 3. Yeni görev oluşturma endpoint'i (POST)
 @app.post("/tasks", status_code=201)
 def create_task(task_data: TaskCreate):
-    # İş Kuralı: Başlık boş mu veya sadece boşluktan mı ibaret kontrol et
     if not task_data.title or task_data.title.strip() == "":
         raise HTTPException(status_code=400, detail="Task title cannot be empty")
     
-    # Yeni ID'yi hesapla (Eğer liste boşsa 1, doluluğa göre son ID + 1)
     new_id = tasks[-1]["id"] + 1 if tasks else 1
-    
-    # Yeni görev sözlüğünü oluştur
     new_task = {
         "id": new_id,
         "title": task_data.title.strip(),
         "done": False
     }
-    
-    # Listemize ekle
     tasks.append(new_task)
-    
-    # Oluşturulan yeni görevi ve 201 kodunu dön
     return new_task
+
+# 4. Görev güncelleme endpoint'i (PUT)
+@app.put("/tasks/{id}")
+def update_task(id: int, task_data: TaskUpdate):
+    # Önce görevi bulalım
+    target_task = None
+    for task in tasks:
+        if task["id"] == id:
+            target_task = task
+            break
+            
+    # Görev yoksa 404 dön
+    if not target_task:
+        raise HTTPException(status_code=404, detail=f"Task {id} not found")
+        
+    # Gövde tamamen boş gönderildiyse 400 dön
+    if task_data.title is None and task_data.done is None:
+        raise HTTPException(status_code=400, detail="Request body cannot be empty")
+        
+    # Eğer title gönderildiyse, boş string olup olmadığını kontrol et ve güncelle
+    if task_data.title is not None:
+        if task_data.title.strip() == "":
+            raise HTTPException(status_code=400, detail="Task title cannot be empty")
+        target_task["title"] = task_data.title.strip()
+        
+    # Eğer done gönderildiyse güncelle
+    if task_data.done is not None:
+        target_task["done"] = task_data.done
+        
+    return target_task
+
+# 5. Görev silme endpoint'i (DELETE)
+@app.delete("/tasks/{id}", status_code=204)
+def delete_task(id: int):
+    for index, task in enumerate(tasks):
+        if task["id"] == id:
+            tasks.pop(index)
+            return Response(status_code=204)
+            
+    # Silinecek görev yoksa 404 dön
+    raise HTTPException(status_code=404, detail=f"Task {id} not found")
